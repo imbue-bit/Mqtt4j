@@ -1,254 +1,182 @@
 # 🚀 Mqtt4j
 
-**零依赖、面向虚拟线程的极轻量 MQTT 客户端**
-
-[![Java](https://img.shields.io/badge/Java-21%2B-orange)](https://openjdk.org/projects/jdk/21/)
+[![Java Version](https://img.shields.io/badge/Java-21%2B-orange)](https://openjdk.org/projects/jdk/21/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![MQTT](https://img.shields.io/badge/MQTT-3.1.1%20%7C%205.0-green)](https://mqtt.org/)
+[![MQTT Protocol](https://img.shields.io/badge/MQTT-3.1.1%20%7C%205.0-green)](https://mqtt.org/)
 
 ---
 
-Mqtt4j 是一个用纯 Java 从零实现的 MQTT 客户端库，专为 Java 21 虚拟线程（Virtual Threads）设计。
+Mqtt4j 是一个使用纯 Java 实现的 MQTT 客户端库，专为 Java 21+ 虚拟线程设计。它不依赖于传统的反应式编程模型或复杂的异步回调，而是采用现代 Java 的阻塞 I/O 与虚拟线程相结合的方式，在保持代码逻辑简单、线性的同时，提供高并发连接能力。
 
-## ✨ 特性
+## 设计初衷与核心优势
 
-- 🪶 **零运行时依赖** — 纯 JDK 实现，无 Netty、无 SLF4J、无任何第三方库
-- 🧵 **虚拟线程原生** — 使用阻塞 I/O + 虚拟线程，一行代码万级并发
-- 📡 **双协议支持** — MQTT v3.1.1 和 v5.0 完整支持
-- 🔒 **TLS/SSL** — 内置 `SSLSocket` 加密传输
-- 🌐 **WebSocket** — 支持 MQTT over WebSocket（ws:// 和 wss://）
-- 🔄 **自动重连** — Exponential Backoff + Jitter 智能重连
-- ⚡ **QoS 0/1/2** — 完整的消息质量等级支持
-- 🏗️ **现代 Java** — sealed interface、record、pattern matching
+在 Java 21 引入虚拟线程后，传统的非阻塞 I/O + 反应式框架（如 Netty）在客户端开发中不再是高并发的唯一最优解。Mqtt4j 正是在这一背景下诞生的：
+
+1. 避免载体线程钉死：传统的 MQTT 客户端（如 Eclipse Paho）大量使用 synchronized 关键字，这会导致虚拟线程在进行 Socket I/O 时钉死在 OS 线程上。Mqtt4j 内部全面采用 ReentrantLock 与并发工具类，确保虚拟线程能够正常调度和让出 CPU。
+2. 零外部依赖：项目不引入 Netty、Jackson、SLF4J 等任何第三方库。这意味着更小的 Jar 包体积（约数百 KB）、更低的内存占用，以及完全免疫由于依赖冲突（Dependency Hell）引发的编译或运行时问题。
+3. 现代 Java 特性集成：代码库全面采用 Java 21+ 的语言特性，包括 `sealed class/interface`（用于强类型报文解析）、`record`（用于不可变数据传输对象）、模式匹配以及 `HttpClient` WebSocket 实现。
+
+---
+
+## 特性
+
+| 分类 | 支持特性 |
+|---|---|
+| 协议版本 | MQTT v3.1.1 与 v5.0 (完整支持属性、原因码等特性) |
+| 传输通道 | TCP Socket、TLS/SSL (支持自定义 KeyStore)、WebSocket / Secure WebSocket |
+| 服务质量 | QoS 0 (At most once), QoS 1 (At least once), QoS 2 (Exactly once) |
+| 高可用性 | 具备抖动退避算法的自动重连机制 |
+| 会话管理 | 离线消息缓存、飞行窗口控制 |
+| 并发模型 | 内部读写循环完全运行于虚拟线程，无阻塞锁阻碍 |
+
+---
 
 ## 📦 安装
 
 ### Maven
 
+在您的 `pom.xml` 中添加以下依赖：
+
 ```xml
 <dependency>
     <groupId>io.mqtt4j</groupId>
     <artifactId>mqtt4j</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
 </dependency>
 ```
 
-### 从源码构建
+### Gradle
 
-```bash
-git clone https://github.com/mqtt4j/mqtt4j.git
-cd mqtt4j
-mvn clean install
+在您的 `build.gradle` 中添加：
+
+```groovy
+implementation 'io.mqtt4j:mqtt4j:0.1.0'
 ```
-
-## 🚀 快速开始
-
-### 基础用法
-
-```java
-import io.mqtt4j.*;
-import io.mqtt4j.message.*;
-
-// 创建并连接
-var client = new MqttClient(MqttClientConfig.builder()
-    .host("broker.emqx.io")
-    .port(1883)
-    .clientId("my-device-001")
-    .build());
-
-client.connect();
-
-// 订阅
-client.subscribe("sensor/temperature", MqttQoS.AT_LEAST_ONCE,
-    (topic, msg) -> System.out.println("温度: " + msg.payloadAsString()));
-
-// 发布
-client.publish("sensor/temperature", "26.5".getBytes(),
-    MqttQoS.AT_LEAST_ONCE, false);
-
-// 断开
-client.disconnect();
-```
-
-### MQTT v5.0
-
-```java
-var client = new MqttClient(MqttClientConfig.builder()
-    .host("broker.emqx.io")
-    .v5()                    // 使用 MQTT v5.0
-    .clientId("v5-device")
-    .cleanSession(true)
-    .keepAlive(30)
-    .build());
-```
-
-### TLS 加密连接
-
-```java
-var client = new MqttClient(MqttClientConfig.builder()
-    .host("broker.emqx.io")
-    .ssl()                   // 自动切换到 8883 端口
-    .build());
-```
-
-### WebSocket 传输
-
-```java
-var client = new MqttClient(MqttClientConfig.builder()
-    .host("broker.emqx.io")
-    .port(8083)
-    .webSocket()             // MQTT over WebSocket
-    .build());
-```
-
-### 遗嘱消息 (LWT)
-
-```java
-var client = new MqttClient(MqttClientConfig.builder()
-    .host("broker.emqx.io")
-    .clientId("device-001")
-    .will("device/001/status", "offline")  // 设备离线时自动发布
-    .build());
-```
-
-### 自动重连
-
-```java
-var client = new MqttClient(MqttClientConfig.builder()
-    .host("broker.emqx.io")
-    .autoReconnect(true)              // 默认开启
-    .reconnectInitialDelay(1000)      // 初始延迟 1 秒
-    .reconnectMaxDelay(30000)         // 最大延迟 30 秒
-    .reconnectMaxRetries(-1)          // 无限重试
-    .build());
-
-client.onConnectionLost(cause ->
-    System.out.println("连接丢失: " + cause.getMessage()));
-
-client.onConnected(() ->
-    System.out.println("已连接/重连成功"));
-```
-
-## 🧵 虚拟线程高并发
-
-Mqtt4j 的核心卖点：**一行代码，万级并发连接**。
-
-```java
-// 10,000 个虚拟线程，每个独立连接一个 MQTT 客户端
-try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-    for (int i = 0; i < 10_000; i++) {
-        final int deviceId = i;
-        executor.submit(() -> {
-            var client = new MqttClient(MqttClientConfig.builder()
-                .host("broker.emqx.io")
-                .clientId("vt-device-" + deviceId)
-                .keepAlive(30)
-                .build());
-
-            client.connect();
-            client.subscribe("sensor/" + deviceId + "/data",
-                MqttQoS.AT_LEAST_ONCE,
-                (topic, msg) -> System.out.printf(
-                    "Device %d: %s%n", deviceId, msg.payloadAsString()));
-        });
-    }
-    // 所有 10,000 个连接在虚拟线程上高效运行
-    // 仅消耗少量平台线程资源
-}
-```
-
-### 为什么虚拟线程适合 MQTT？
-
-| 传统方式 | Mqtt4j + 虚拟线程 |
-|---------|-----------------|
-| Netty/NIO + 回调 | 阻塞 Socket + 虚拟线程 |
-| 回调地狱，调试困难 | 顺序逻辑，栈帧清晰 |
-| 线程池限制并发数 | 百万级虚拟线程 |
-| synchronized → 死锁风险 | ReentrantLock，无 pinning |
-
-## 📊 架构
-
-```
-┌─────────────────────────────────────────┐
-│              MqttClient                 │
-│         (用户面向的高层 API)              │
-├─────────────────────────────────────────┤
-│  KeepAliveManager │ InflightManager     │
-│  ReconnectManager │ PacketIdAllocator   │
-│              MqttSession                │
-├─────────────────────────────────────────┤
-│      MqttPacketEncoder/Decoder          │
-│   ConnectPacket │ PublishPacket │ ...    │
-│        (sealed interface 体系)          │
-├─────────────────────────────────────────┤
-│           MqttTransport                 │
-│   TcpTransport │ SslTransport │ WS     │
-└─────────────────────────────────────────┘
-```
-
-## 🆚 与 Paho 对比
-
-| 特性 | Eclipse Paho | Mqtt4j |
-|-----|-------------|--------|
-| 运行时依赖 | 有 | **零** |
-| 最低 Java 版本 | 8 | 21 |
-| 虚拟线程支持 | ❌ synchronized 导致 pinning | ✅ 原生适配 |
-| MQTT v5.0 | ✅ | ✅ |
-| 代码风格 | Java 8 回调 | 现代 Java（record、sealed） |
-| WebSocket | 需要额外依赖 | ✅ JDK 内置 |
-| 线程模型 | 内部线程池 + 锁 | 虚拟线程 + ReentrantLock |
-| 代码量 | ~50K LOC | ~5K LOC |
-
-## 📋 QoS 级别
-
-| QoS | 名称 | 保证 | 流程 |
-|-----|------|------|------|
-| 0 | At Most Once | 最多一次 | PUBLISH → |
-| 1 | At Least Once | 至少一次 | PUBLISH → PUBACK |
-| 2 | Exactly Once | 恰好一次 | PUBLISH → PUBREC → PUBREL → PUBCOMP |
-
-## 🔧 配置参考
-
-```java
-MqttClientConfig.builder()
-    // 连接
-    .host("localhost")           // 默认: localhost
-    .port(1883)                  // 默认: 1883
-    .connectTimeout(10000)       // 默认: 10s
-
-    // 协议
-    .version(MqttVersion.V3_1_1) // 默认: v3.1.1
-    .clientId("my-client")       // 默认: 自动生成
-    .cleanSession(true)          // 默认: true
-    .keepAlive(60)               // 默认: 60s
-
-    // 认证
-    .username("user")
-    .password("pass")
-
-    // 传输
-    .ssl()                       // TLS 加密
-    .webSocket()                 // WebSocket
-    .sslContext(mySSLContext)     // 自定义 SSL 上下文
-
-    // 重连
-    .autoReconnect(true)         // 默认: true
-    .reconnectInitialDelay(1000) // 默认: 1s
-    .reconnectMaxDelay(30000)    // 默认: 30s
-    .reconnectMaxRetries(-1)     // 默认: 无限
-
-    // QoS
-    .maxInflight(65535)          // 默认: 65535
-    .publishTimeout(30000)       // 默认: 30s
-    .maxRetries(3)               // 默认: 3
-
-    .build();
-```
-
-## 📄 License
-
-[Apache License 2.0](LICENSE)
 
 ---
 
-> **Mqtt4j** — 让 MQTT 回归简单。
+## Quick Start
+
+### 1. 基础发布与订阅 (MQTT v3.1.1)
+
+```java
+import io.mqtt4j.client.MqttClient;
+import io.mqtt4j.client.MqttClientConfig;
+import io.mqtt4j.model.MqttQoS;
+import java.nio.charset.StandardCharsets;
+
+public class QuickStart {
+    public static void main(String[] args) {
+        // 配置客户端
+        MqttClientConfig config = MqttClientConfig.builder()
+                .host("broker.emqx.io")
+                .port(1883)
+                .clientId("java-client-quickstart")
+                .cleanSession(true)
+                .build();
+
+        // 使用 try-with-resources 自动管理资源
+        try (MqttClient client = new MqttClient(config)) {
+            // 同步建立连接
+            client.connect();
+
+            // 订阅主题
+            client.subscribe("sensors/temperature", MqttQoS.AT_LEAST_ONCE, (topic, message) -> {
+                String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
+                System.out.printf("收到主题 [%s] 的消息: %s%n", topic, payload);
+            });
+
+            // 发布消息
+            client.publish("sensors/temperature", "23.5".getBytes(StandardCharsets.UTF_8), MqttQoS.AT_LEAST_ONCE);
+            
+            // 阻塞主线程以保持演示运行
+            Thread.sleep(5000);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+### 2. TLS + MQTT v5.0
+
+```java
+MqttClientConfig config = MqttClientConfig.builder()
+        .host("secure-broker.example.com")
+        .port(8883)
+        .v5() // 启用 MQTT 5.0
+        .ssl() // 启用 TLS 加密，默认使用 JDK 信任证书链
+        .username("admin")
+        .password("secure_password_here")
+        .will("status/offline", "device_disconnected".getBytes(), MqttQoS.AT_LEAST_ONCE, true) // 遗嘱消息
+        .keepAlive(30)
+        .build();
+```
+
+### 3. 基于 WebSocket 的连接
+
+```java
+MqttClientConfig config = MqttClientConfig.builder()
+        .host("broker.emqx.io")
+        .port(8084)
+        .webSocket() // 使用内置的 WebSocket 适配层
+        .ssl() // wss:// 协议
+        .build();
+```
+
+---
+
+## 虚拟线程下的并发表现
+
+由于 Mqtt4j 移除了对平台线程池的依赖，在处理大规模连接时，可以直接利用虚拟线程执行并发任务，使每个连接的生命周期管理更贴近传统的顺序编程逻辑。
+
+### 模拟万级并发客户端连接
+
+```java
+import io.mqtt4j.client.MqttClient;
+import io.mqtt4j.client.MqttClientConfig;
+import java.util.concurrent.Executors;
+
+public class ScaleTest {
+    public static void main(String[] args) {
+        int clientCount = 10_000;
+        
+        // 创建一个基于虚拟线程的 Executor
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (int i = 0; i < clientCount; i++) {
+                final int index = i;
+                executor.submit(() -> {
+                    MqttClientConfig config = MqttClientConfig.builder()
+                            .host("broker.emqx.io")
+                            .clientId("client-vt-" + index)
+                            .keepAlive(60)
+                            .build();
+
+                    try {
+                        MqttClient client = new MqttClient(config);
+                        client.connect();
+                        
+                        // 连接成功后，每个客户端可以独立进行读写工作，无需复杂的事件循环回调
+                        client.subscribe("device/control/" + index, (topic, msg) -> {
+                            // 业务处理逻辑
+                        });
+                    } catch (Exception e) {
+                        // 异常处理
+                    }
+                });
+            }
+        } // 所有提交的虚拟线程任务在此处等待执行完毕
+    }
+}
+```
+
+### 为什么在虚拟线程环境下避免使用传统的异步客户端？
+
+1.  Pinning 问题：在底层代码中使用 `synchronized` 方法或块时，若在该块内发生了 I/O 阻塞，虚拟线程将无法脱离其底层的操作系统载体线程（Carrier Thread），导致高并发优势失效。Mqtt4j 使用 `java.util.concurrent.locks.ReentrantLock` 替代了所有的同步锁。
+2.  堆栈清晰度：当连接发生异常或数据解析出错时，Mqtt4j 的调用栈保持了从业务层到 Socket 读取层的完整同步链路，排查问题无需在异步回调或 Reactive Stream 的无序堆栈中进行回溯。
+
+---
+
+## 开源协议
+
+本项目采用 [Apache License 2.0](LICENSE) 协议进行分发与使用。
