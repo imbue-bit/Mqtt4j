@@ -13,7 +13,7 @@ Mqtt4j 是一个使用纯 Java 实现的 MQTT 客户端库，专为 Java 21+ 虚
 在 Java 21 引入虚拟线程后，传统的非阻塞 I/O + 反应式框架（如 Netty）在客户端开发中不再是高并发的唯一最优解。Mqtt4j 正是在这一背景下诞生的：
 
 1. 避免载体线程钉死：传统的 MQTT 客户端（如 Eclipse Paho）大量使用 synchronized 关键字，这会导致虚拟线程在进行 Socket I/O 时钉死在 OS 线程上。Mqtt4j 内部全面采用 ReentrantLock 与并发工具类，确保虚拟线程能够正常调度和让出 CPU。
-2. 零外部依赖：项目不引入 Netty、Jackson、SLF4J 等任何第三方库。这意味着更小的 Jar 包体积（约数百 KB）、更低的内存占用，以及完全免疫由于依赖冲突（Dependency Hell）引发的编译或运行时问题。
+2. 零外部依赖：项目不引入 Netty、Jackson、SLF4J 等任何第三方库。这意味着更小的 Jar 包体积（约数百 KB）、更低的内存占用，以及完全免疫由于依赖冲突引发的编译或运行时问题。
 3. 现代 Java 特性集成：代码库全面采用 Java 21+ 的语言特性，包括 `sealed class/interface`（用于强类型报文解析）、`record`（用于不可变数据传输对象）、模式匹配以及 `HttpClient` WebSocket 实现。
 
 ---
@@ -172,7 +172,7 @@ public class ScaleTest {
 
 ### 为什么在虚拟线程环境下避免使用传统的异步客户端？
 
-1.  Pinning 问题：在底层代码中使用 `synchronized` 方法或块时，若在该块内发生了 I/O 阻塞，虚拟线程将无法脱离其底层的操作系统载体线程（Carrier Thread），导致高并发优势失效。Mqtt4j 使用 `java.util.concurrent.locks.ReentrantLock` 替代了所有的同步锁。
+1.  Pinning 问题：在底层代码中使用 `synchronized` 方法或块时，若在该块内发生了 I/O 阻塞，虚拟线程将无法脱离其底层的操作系统载体线程，导致高并发优势失效。Mqtt4j 使用 `java.util.concurrent.locks.ReentrantLock` 替代了所有的同步锁。
 2.  堆栈清晰度：当连接发生异常或数据解析出错时，Mqtt4j 的调用栈保持了从业务层到 Socket 读取层的完整同步链路，排查问题无需在异步回调或 Reactive Stream 的无序堆栈中进行回溯。
 
 ---
